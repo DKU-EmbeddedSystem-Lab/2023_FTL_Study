@@ -5,7 +5,8 @@
 Keywords **_SSD FTL_** 
 
 * **Members**
-    - Professor 최 종무
+    - Professor 
+        + 최 종무
     - students
         + 신 수환
         + 주용지엔
