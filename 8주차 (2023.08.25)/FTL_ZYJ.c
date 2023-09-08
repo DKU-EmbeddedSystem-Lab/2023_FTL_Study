@@ -6,6 +6,7 @@
 #define PAGES_PER_BLOCK 16
 #define PAGE_SIZE 4096
 #define GCTrigger 0.6
+#define ECC 50
 
 typedef struct {
     char data[PAGE_SIZE];
@@ -205,7 +206,7 @@ void writePagetoFlash() {
 
 // page를 write buffer 빈공간에 쓰는 함수
 void writePageToSpecificBufferSlot(int slot, int logicalBlock, char *buffer) {
-    memcpy(writeBuffer[slot].data, buffer, PAGE_SIZE);
+    memcpy(writeBuffer[slot].data, buffer, PAGE_SIZE - ECC);
     writeBuffer[slot].LPN = logicalBlock;
     writeBuffer[slot].iswritten = true;
     if (writeBuffer[slot].LPN) {
@@ -251,7 +252,7 @@ int main() {
     initFTL();
     initinvalidPagesCounter();
 
-    char buffer[PAGE_SIZE] = "Hello";
+    char buffer[PAGE_SIZE - ECC] = "Hello";
     char readBuffer[PAGE_SIZE];
     
     writePagetoBuffer(10, buffer);
