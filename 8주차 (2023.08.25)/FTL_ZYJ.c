@@ -21,10 +21,10 @@ typedef struct {
 typedef struct {
     int PBN;
     int PPN;
-} PhysicalLocation; 
+} PhysicalLocation;
 
 typedef struct {
-    int PPN[BLOCK_SIZE];
+    int LPN[BLOCK_SIZE];
 } LogicalLocation;
 
 
@@ -40,7 +40,7 @@ PWBuffer writeBuffer[BLOCK_SIZE]; // write buffer
 
 
 PhysicalLocation L2P[TOTAL_BLOCKS * BLOCK_SIZE]; // page mapping table
-LogicalLocation P2L[TOTAL_BLOCKS]; // physical block mapping table, 1차배열을 struct배열로 변경, 즉 page들을 block마다 격리
+LogicalLocation P2L[TOTAL_BLOCKS]; // physical block mapping table. 1차
 
 int invalidPagesCounter[TOTAL_BLOCKS]; // block 내의 invalid page 수를 저장하는 배열
 int GCMappingSupporter[BLOCK_SIZE]; 
@@ -54,7 +54,7 @@ void initFTL() {
     for (int i = 0; i < TOTAL_BLOCKS; i++) {
         for (int j = 0; j < BLOCK_SIZE; j++) {
             flash[i].valid[j] = 0;
-            P2L[i].PPN[j] = -1;  
+            P2L[i].LPN[j] = -1;  
         }
         invalidPagesCounter[i] = BLOCK_SIZE;
     }
@@ -102,14 +102,14 @@ void initinvalidPagesCounter(){
 void eraseBlock(int physicalBlock) {
     if (physicalBlock != -1) {
         for (int j = 0; j < BLOCK_SIZE; j++) {
-            int logicalPage = P2L[physicalBlock].PPN[j]; 
+            int logicalPage = P2L[physicalBlock].LPN[j]; 
             memset(flash[physicalBlock].pages[j].data, 0, PAGE_SIZE);
             flash[physicalBlock].valid[j] = 0;
             if(logicalPage != -1) {
                 L2P[logicalPage].PBN = -1;
                 L2P[logicalPage].PPN = -1;
             }
-            P2L[physicalBlock].PPN[j] = -1; 
+            P2L[physicalBlock].LPN[j] = -1; 
         }
         invalidPagesCounter[physicalBlock] = BLOCK_SIZE;
     }
@@ -118,10 +118,10 @@ void eraseBlock(int physicalBlock) {
 // Page merge GC (only 2 blocks supported)
 void moveValidPagesToBuffer(int targetBlock, int *l) {
     for (int k = 0; k < BLOCK_SIZE; k++) {
-        if (flash[targetBlock].valid[k] && L2P[P2L[targetBlock].PPN[k]].PBN == targetBlock) {
+        if (flash[targetBlock].valid[k] && L2P[P2L[targetBlock].LPN[k]].PBN == targetBlock) {
             memcpy(GCBuffer.pages[*l].data, flash[targetBlock].pages[k].data, PAGE_SIZE);
-            GCMappingSupporter[*l] = k;
-            GCBufferLogicalMapping[*l] = P2L[targetBlock].PPN[k];
+            GCMappingSupporter[*l] = k; // buffer에 읽어가는 page의 index를 저장
+            GCBufferLogicalMapping[*l] = P2L[targetBlock].LPN[k]; // index된 page의 logical page number를 저장
             (*l)++;
         }
     }
@@ -132,25 +132,27 @@ void garbageCollector_forTheWorst() {
     int HtargetBlock = -1;
     int LtargetBlock = -1;
     int MaxInvalidPages = -1;
-    int RemainingPages = 0;
+    int ValidPagesInHTarget = 0; // HtargetBlock의 유요한 page 수를 저장하는 변수
 
     for (int i = 0; i < TOTAL_BLOCKS; i++) {
         int currentInvalidPages = invalidPagesCounter[i];
         if (currentInvalidPages > GCTrigger * BLOCK_SIZE) {
             HtargetBlock = i;
             MaxInvalidPages = currentInvalidPages;
-            RemainingPages = BLOCK_SIZE - MaxInvalidPages;
+            ValidPagesInHTarget = BLOCK_SIZE - MaxInvalidPages;
+            break;
         }
     }
 
     bool foundLtargetBlock = false;
     for (int j = 0; j < TOTAL_BLOCKS && !foundLtargetBlock; j++) {
         int currentInvalidPages = invalidPagesCounter[j];
-        if (currentInvalidPages == RemainingPages) {
+        if (currentInvalidPages == ValidPagesInHTarget) {
             LtargetBlock = j;
             foundLtargetBlock = true;
-        } else if (currentInvalidPages < RemainingPages && currentInvalidPages > 0 && LtargetBlock == -1) {
+        } else if (currentInvalidPages > ValidPagesInHTarget && currentInvalidPages > 0 && LtargetBlock == -1) {
             LtargetBlock = j;
+            break;
         }
     }
 
@@ -169,22 +171,22 @@ void garbageCollector_forTheWorst() {
             int logicalPage = GCBufferLogicalMapping[k];
             L2P[logicalPage].PBN = GCnewPhysicalBlock;
             L2P[logicalPage].PPN = k;
-            P2L[GCnewPhysicalBlock].PPN[k] = logicalPage; 
+            P2L[GCnewPhysicalBlock].LPN[k] = logicalPage; 
         }  
         invalidPagesCounter[GCnewPhysicalBlock] = BLOCK_SIZE - l;
     }
 }
 
-void readPage(int logicalBlock, char *buffer) {
+void readPage(int logicalPage, char *buffer) {
     // check write buffer first
     for (int i = 0; i < BLOCK_SIZE; i++) {
-        if (writeBuffer[i].LPN == logicalBlock) {
+        if (writeBuffer[i].LPN == logicalPage) {
             memcpy(buffer, writeBuffer[i].data, PAGE_SIZE);
             return;
         }
     }
-    int physicalBlock = L2P[logicalBlock].PBN;
-    int page = L2P[logicalBlock].PPN;
+    int physicalBlock = L2P[logicalPage].PBN;
+    int page = L2P[logicalPage].PPN;
     if (physicalBlock != -1 && page != -1 && flash[physicalBlock].valid[page]) {
         memcpy(buffer, flash[physicalBlock].pages[page].data, PAGE_SIZE);
     } 
@@ -204,7 +206,7 @@ void writePagetoFlash() {
         flash[newPhysicalBlock].valid[i] = 1;
         L2P[writeBuffer[i].LPN].PBN = newPhysicalBlock;
         L2P[writeBuffer[i].LPN].PPN = i;
-        P2L[newPhysicalBlock].PPN[i] = writeBuffer[i].LPN; // 使用新的P2L结构
+        P2L[newPhysicalBlock].LPN[i] = writeBuffer[i].LPN; // 使用新的P2L结构
         if (updateCounter[i]) {
             invalidPagesCounter[newPhysicalBlock]++;
         }
@@ -213,9 +215,9 @@ void writePagetoFlash() {
 }
 
 // page를 write buffer 빈공간에 쓰는 함수
-void writePageToSpecificBufferSlot(int slot, int logicalBlock, char *buffer) {
+void writePageToSpecificBufferSlot(int slot, int logicalPage, char *buffer) {
     memcpy(writeBuffer[slot].data, buffer, PAGE_SIZE - ECC);
-    writeBuffer[slot].LPN = logicalBlock;
+    writeBuffer[slot].LPN = logicalPage;
     writeBuffer[slot].iswritten = true;
     if (writeBuffer[slot].LPN) {
         updateCounter[slot] = 1;
@@ -225,26 +227,26 @@ void writePageToSpecificBufferSlot(int slot, int logicalBlock, char *buffer) {
 }
 
 // write buffer에 있는 data를 수정할때 사용되는 함수
-bool tryUpdateExistingBuffer(int logicalBlock, char *buffer) {
+bool tryUpdateExistingBuffer(int logicalPage, char *buffer) {
     for (int i = 0; i < BLOCK_SIZE; i++) {
-        if (writeBuffer[i].iswritten == true && writeBuffer[i].LPN == logicalBlock) {
-            writePageToSpecificBufferSlot(i, logicalBlock, buffer);
+        if (writeBuffer[i].iswritten == true && writeBuffer[i].LPN == logicalPage) {
+            writePageToSpecificBufferSlot(i, logicalPage, buffer);
             return true;
         }
     }
     return false;
 }
 
-void writePagetoBuffer(int logicalBlock, char *buffer) {
+void writePagetoBuffer(int logicalPage, char *buffer) {
     // buffer에 해당되는 logicalBlock이 있다면 update
-    if (tryUpdateExistingBuffer(logicalBlock, buffer)) {
+    if (tryUpdateExistingBuffer(logicalPage, buffer)) {
         return;
     }
 
     // buffer의 빈공간에 write
     for (; n < BLOCK_SIZE; n++) {
         if (!writeBuffer[n].iswritten) {
-            writePageToSpecificBufferSlot(n, logicalBlock, buffer);
+            writePageToSpecificBufferSlot(n, logicalPage, buffer);
             break;
         }
     }
