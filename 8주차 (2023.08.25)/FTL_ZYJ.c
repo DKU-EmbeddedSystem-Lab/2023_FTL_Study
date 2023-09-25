@@ -118,7 +118,7 @@ void eraseBlock(int physicalBlock) {
 // Page merge GC (only 2 blocks supported)
 void moveValidPagesToBuffer(int targetBlock, int *l) {
     for (int k = 0; k < BLOCK_SIZE; k++) {
-        if (flash[targetBlock].valid[k] && L2P[P2L[targetBlock].LPN[k]].PBN == targetBlock) {
+        if (L2P[P2L[targetBlock].LPN[k]].PBN == targetBlock) {
             memcpy(GCBuffer.pages[*l].data, flash[targetBlock].pages[k].data, PAGE_SIZE);
             GCMappingSupporter[*l] = k; // buffer에 읽어가는 page의 index를 저장
             GCBufferLogicalMapping[*l] = P2L[targetBlock].LPN[k]; // index된 page의 logical page number를 저장
